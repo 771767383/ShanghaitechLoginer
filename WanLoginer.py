@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import time
 import ddddocr
 
-ocr = ddddocr.DdddOcr(show_ad = False)
+ocr = ddddocr.DdddOcr(beta=True, show_ad = False)
 
 max_attempt = 20
 username = None
@@ -130,6 +130,7 @@ def getValidCode() -> str:
 )
  
     img = img_response.content
+    ocr.set_ranges(6)
     validcode = ocr.classification(img)
     print(validcode)
     return validcode
