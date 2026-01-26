@@ -4,6 +4,9 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import ddddocr
+import socket
+import platform
+import subprocess
 
 ocr = ddddocr.DdddOcr(beta=True, show_ad = False)
 
@@ -16,7 +19,9 @@ ac_ip = "10.13.7.59"
 pushPageId = "5bf74194-d2a8-4bb8-ac6b-8ff3e855f6a7"
 ssid = "PUxzd1NzaWRQbGFjZWhvbGRlcj0="
 url_prefix = "https://net-auth.shanghaitech.edu.cn:19008/portalpage/04b92f0a808c4d10b572642e3be564b2/20221024095238/pc/auth.html"
-refer_url = url_prefix + "?ac-ip={acip}&uaddress={uip}&umac=null&authType=1&lang=zh_CN&ssid={sid}&pushPageId={pid}".format(acip=ac_ip, uip = u_ip, sid = ssid,pid = pushPageId)
+
+def get_refer_url():
+    return url_prefix + "?ac-ip={acip}&uaddress={uip}&umac=null&authType=1&lang=zh_CN&ssid={sid}&pushPageId={pid}".format(acip=ac_ip, uip = u_ip, sid = ssid,pid = pushPageId)
 
 def get_user_config():
     config = configparser.ConfigParser()
@@ -43,6 +48,36 @@ def set_user_config(username, password, u_ip):
 
 
 
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # connect to the auth server to determine the correct outgoing interface
+        # This is more accurate than 8.8.8.8 for campus networks
+        s.connect((ac_ip, 19008))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        try:
+            # Fallback to public DNS if auth server is unreachable
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return local_ip
+        except Exception:
+            return "127.0.0.1"
+
+def testInternet(host="baidu.com") -> bool:
+    param = '-n' if platform.system().lower() == 'windows' else '-c'
+    # Use subprocess to hide output and support cross-platform
+    try:
+        command = ['ping', param, '1', host]
+        return subprocess.call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    except Exception:
+        return False
+
 def AcquireInternet(validcode:str) -> bool :
 
     headers = {
@@ -54,7 +89,7 @@ def AcquireInternet(validcode:str) -> bool :
     'DNT': '1',
     'Origin': 'https://net-auth.shanghaitech.edu.cn:19008',
     'Pragma': 'no-cache',
-    'Referer': refer_url,
+    'Referer': get_refer_url(),
     'Sec-Fetch-Dest': 'empty',
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Site': 'same-origin',
@@ -106,7 +141,7 @@ def getValidCode() -> str:
     # 'Cookie': 'PSESSIONID=',
     'DNT': '1',
     'Pragma': 'no-cache',
-    'Referer': refer_url,
+    'Referer': get_refer_url(),
     'Sec-Fetch-Dest': 'image',
     'Sec-Fetch-Mode': 'no-cors',
     'Sec-Fetch-Site': 'same-origin',
@@ -135,31 +170,51 @@ def getValidCode() -> str:
     print(validcode)
     return validcode
 
-def testInternet() -> bool:
-    ret = os.system("ping baidu.com -n 1")
-    return True if ret == 0 else False
-
-
 def main():
-    if(testInternet() == True):
-        print("Internet Connected")
-        exit(0)
+    local_ip = get_local_ip()
+    print("Local IP: {}".format(local_ip))
+    print("Target IP: {}".format(u_ip))
+
+    is_connected = testInternet()
+
+    should_auth = False
+    if not is_connected:
+        print("Internet Not Connected. Starting login process...")
+        should_auth = True
+    elif u_ip != local_ip:
+        print("Local internet connected, but target IP ({}) differs from local IP ({}). executing auth...".format(u_ip, local_ip))
+        should_auth = True
     else:
+        print("Internet Connected.")
+        exit(0)
+
+    if should_auth:
         connection_flag = False
         attempt_count = 0
         while((not connection_flag) and (attempt_count < max_attempt)):
+            # If we are helping a remote IP and we already have internet, 
+            # AcquireInternet will return True (because testInternet() is True).
+            # But the POST request inside it has been executed.
             if(AcquireInternet(getValidCode()) == True):
                 connection_flag = True
             else:
                 print("Attempt {0} Fail. Try again later!".format(attempt_count+1))
                 time.sleep(60)
+        
+        if(connection_flag == False):
+            print("Fail to connect Internet after {0} times attempts.".format(max_attempt))
+            exit(-1)
         else:
-            if(connection_flag == False):
-                print("Fail to connect Internet after {0} times attempts.".format(max_attempt))
-                exit(-1)
+            print("Login process completed.")
+            if u_ip != local_ip:
+                print("Pinging target host {} ...".format(u_ip))
+                if testInternet(u_ip):
+                    print("Ping {} Success.".format(u_ip))
+                else:
+                    print("Ping {} Failed.".format(u_ip))
             else:
                 print("Internet Connected")
-                exit(0)
+            exit(0)
 
 
 if __name__ == '__main__':
